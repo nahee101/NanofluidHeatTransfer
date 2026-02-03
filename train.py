@@ -58,7 +58,7 @@ def train_single_model(model_name, model, X_train, X_test, y_train, y_test):
         mlflow.log_metric("mse", mse)
         mlflow.log_metric("r2", r2)
         
-        # Log and register model to Model Registry
+        # Log model and register to Model Registry
         mlflow.sklearn.log_model(
             model, 
             "model",
@@ -165,8 +165,15 @@ def train(auto_promote_to_production=False):
         result = train_single_model(model_name, model, X_train, X_test, y_train, y_test)
         results.append(result)
     
-    # Find best model (highest R2)
-    best_result = max(results, key=lambda x: x["r2"])
+    # Find best model (highest R2, if tie then latest/last trained)
+    # Sort by R2 descending, then by index descending (latest first)
+    # Since results are in training order, later index = more recent
+    sorted_results = sorted(
+        enumerate(results), 
+        key=lambda x: (x[1]["r2"], x[0]),  # (r2, index) - higher is better for both
+        reverse=True
+    )
+    best_result = sorted_results[0][1]
     
     print(f"\n{'='*50}")
     print(f"RESULTS SUMMARY")
@@ -177,25 +184,26 @@ def train(auto_promote_to_production=False):
         marker = " ★ BEST" if r["model_name"] == best_result["model_name"] else ""
         print(f"{r['model_name']:<20} {r['mse']:<15.6f} {r['r2']:<15.6f}{marker}")
     
-    print(f"\n{'='*50}")
-    print(f"MODEL REGISTRY")
-    print(f"{'='*50}")
-    
-    # Promote best model to Staging
-    print(f"\nPromoting best model ({best_result['model_name']}) to Staging...")
-    promote_best_model_to_staging(best_result['run_id'])
-    
-    # Optionally promote to Production
-    if auto_promote_to_production:
-        print(f"\nAuto-promoting to Production...")
-        promote_staging_to_production()
-    else:
-        print(f"\n💡 To promote to Production, run:")
-        print(f"   python -c \"from train import promote_staging_to_production; promote_staging_to_production()\"")
+    # Try to use Model Registry (may fail due to compatibility issues)
+    try:
+        print(f"\n{'='*50}")
+        print(f"MODEL REGISTRY")
+        print(f"{'='*50}")
+        
+        # Promote best model to Staging
+        print(f"\nPromoting best model ({best_result['model_name']}) to Staging...")
+        promote_best_model_to_staging(best_result['run_id'])
+        
+        # Optionally promote to Production
+        if auto_promote_to_production:
+            print(f"\nAuto-promoting to Production...")
+            promote_staging_to_production()
+    except Exception as e:
+        print(f"\n⚠️ Model Registry operations skipped (compatibility issue): {e}")
+        print("Models are still saved and can be loaded from experiment runs.")
     
     print(f"\n✅ Best model: {best_result['model_name']} (R2: {best_result['r2']:.6f})")
     print(f"\n📊 View models: mlflow ui --port 5001")
-    print(f"   Then go to 'Models' tab to see {MODEL_NAME}")
 
 
 if __name__ == "__main__":

@@ -43,11 +43,6 @@
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
             width: 100%;
             max-width: 450px;
-            transition: transform 0.3s ease;
-        }
-
-        .container:hover {
-            transform: translateY(-5px);
         }
 
         h1, h2 {
@@ -100,15 +95,10 @@
             font-size: 1rem;
             font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.1s ease;
         }
 
         button:hover {
             background-color: #357abd;
-        }
-
-        button:active {
-            transform: scale(0.98);
         }
 
         button:disabled {
@@ -257,6 +247,56 @@
             text-align: center;
             display: none;
         }
+
+        .btn-danger {
+            background-color: var(--danger-color);
+            color: white;
+            margin-top: 0.5rem;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .btn-reset {
+            background-color: #6c757d;
+            color: white;
+            margin-top: 0.5rem;
+        }
+
+        .btn-reset:hover {
+            background-color: #5a6268;
+        }
+
+        .drift-status {
+            margin-top: 1rem;
+            padding: 0.8rem;
+            border-radius: 6px;
+            text-align: center;
+            display: none;
+        }
+
+        .drift-alert {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .drift-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .button-group button {
+            flex: 1;
+        }
     </style>
 </head>
 <body>
@@ -301,19 +341,33 @@
             <!-- Performance Bar -->
             <div class="performance-container">
                 <div class="performance-label">
-                    <span>Performance (R2)</span>
+                    <span>Performance (R2) <span id="r2Source" style="font-size: 0.8rem; color: #666;"></span></span>
                     <span id="performancePercent">-</span>
                 </div>
                 <div class="performance-bar">
                     <div class="performance-fill" id="performanceFill" style="width: 0%; background-color: #28a745;"></div>
                 </div>
+                <div style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;">
+                    <span>Training R2: <strong id="trainingR2">-</strong></span>
+                    <span style="margin-left: 1rem;">Realtime R2: <strong id="realtimeR2">-</strong></span>
+                    <span style="margin-left: 0.5rem; font-size: 0.8rem;" id="sampleCount"></span>
+                </div>
             </div>
             
-            <!-- Retrain Button -->
-            <button class="btn-retrain" id="retrainBtn" onclick="retrainModel()">
-                Retrain Model
-            </button>
+            <!-- Button Group -->
+            <div class="button-group">
+                <button class="btn-retrain" id="retrainBtn" onclick="retrainModel()">
+                    Retrain Model
+                </button>
+                <button class="btn-danger" id="driftBtn" onclick="simulateDrift()">
+                    Simulate Drift
+                </button>
+                <button class="btn-reset" id="resetBtn" onclick="resetDrift()">
+                    Reset
+                </button>
+            </div>
             
+            <div id="driftStatus" class="drift-status"></div>
             <div id="retrainStatus"></div>
         </div>
 
@@ -365,29 +419,40 @@
                 document.getElementById('modelRunId').title = runId;  // Full ID on hover
                 document.getElementById('modelType').textContent = info.model_type || 'Unknown';
                 
-                const r2 = parseFloat(info.r2);
+                const trainingR2 = parseFloat(info.training_r2);
+                const realtimeR2 = info.realtime_r2;
+                const displayR2 = parseFloat(info.display_r2);
                 const mse = parseFloat(info.mse);
+                const sampleCount = info.realtime_sample_count || 0;
+                const r2Source = info.r2_source;
                 
-                document.getElementById('modelR2').textContent = isNaN(r2) ? '-' : r2.toFixed(6);
+                document.getElementById('modelR2').textContent = isNaN(trainingR2) ? '-' : trainingR2.toFixed(6);
                 document.getElementById('modelMSE').textContent = isNaN(mse) ? '-' : mse.toFixed(6);
                 
-                // Update performance bar
-                if (!isNaN(r2)) {
-                    const percent = Math.max(0, Math.min(100, r2 * 100));
+                // Update training and realtime R2 display
+                document.getElementById('trainingR2').textContent = isNaN(trainingR2) ? '-' : (trainingR2 * 100).toFixed(1) + '%';
+                document.getElementById('realtimeR2').textContent = realtimeR2 !== null ? (realtimeR2 * 100).toFixed(1) + '%' : '-';
+                document.getElementById('sampleCount').textContent = sampleCount > 0 ? `(${sampleCount} samples)` : '';
+                document.getElementById('r2Source').textContent = r2Source === 'realtime' ? '[Realtime]' : '[Training]';
+                
+                // Update performance bar using display_r2 (which considers realtime if available)
+                if (!isNaN(displayR2)) {
+                    const percent = Math.max(0, Math.min(100, displayR2 * 100));
                     document.getElementById('performancePercent').textContent = percent.toFixed(1) + '%';
-                    document.getElementById('performanceFill').style.width = percent + '%';
+                    document.getElementById('performanceFill').style.width = Math.max(0, percent) + '%';
                     
                     // Color based on performance
                     let color = '#28a745';  // green
-                    if (r2 < 0.9) color = '#dc3545';  // red
-                    else if (r2 < PERFORMANCE_THRESHOLD) color = '#ffc107';  // yellow
+                    if (displayR2 < 0.9) color = '#dc3545';  // red
+                    else if (displayR2 < PERFORMANCE_THRESHOLD) color = '#ffc107';  // yellow
                     document.getElementById('performanceFill').style.backgroundColor = color;
                     
                     // Update status badge
-                    if (r2 >= PERFORMANCE_THRESHOLD) {
+                    if (displayR2 >= PERFORMANCE_THRESHOLD) {
                         document.getElementById('modelStatus').textContent = 'Good';
                         document.getElementById('modelStatus').className = 'status-badge status-good';
-                    } else if (r2 >= 0.9) {
+                        document.getElementById('autoRetrainAlert').style.display = 'none';
+                    } else if (displayR2 >= 0.9) {
                         document.getElementById('modelStatus').textContent = 'Warning';
                         document.getElementById('modelStatus').className = 'status-badge status-warning';
                         document.getElementById('autoRetrainAlert').style.display = 'block';
@@ -401,6 +466,140 @@
                 console.error('Error loading model info:', error);
                 document.getElementById('modelName').textContent = 'Error loading';
             }
+        }
+
+        // Simulate data drift
+        async function simulateDrift() {
+            const btn = document.getElementById('driftBtn');
+            const status = document.getElementById('driftStatus');
+            
+            btn.disabled = true;
+            btn.textContent = 'Simulating...';
+            status.style.display = 'block';
+            status.className = 'drift-status drift-info';
+            status.textContent = 'Sending abnormal data to trigger drift detection...';
+            
+            try {
+                const response = await fetch('/simulate-drift', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    status.className = 'drift-status drift-alert';
+                    const realtimeR2 = result.realtime_r2 !== null ? (result.realtime_r2 * 100).toFixed(1) + '%' : 'N/A';
+                    status.innerHTML = `
+                        <strong>Drift Detected!</strong><br>
+                        Drift Scores: eta=${result.drift_scores.eta.toFixed(2)}, 
+                        f=${result.drift_scores.f.toFixed(2)}, 
+                        f_prime=${result.drift_scores.f_prime.toFixed(2)}<br>
+                        <strong>Realtime Performance: R2 = ${realtimeR2}</strong> (${result.sample_count} samples)<br>
+                        ${result.auto_retrain_triggered ? '<br><strong>Auto-retrain triggered!</strong>' : 'Click "Retrain Model" to fix.'}
+                    `;
+                    document.getElementById('autoRetrainAlert').style.display = 'block';
+                    document.getElementById('autoRetrainAlert').textContent = 'Performance dropped! Retraining recommended.';
+                    
+                    // Immediately update model info to reflect new performance
+                    loadModelInfo();
+                    
+                    // If auto-retrain was triggered, wait and reload
+                    if (result.auto_retrain_triggered) {
+                        setTimeout(() => {
+                            status.className = 'drift-status drift-info';
+                            status.textContent = 'Auto-retraining in progress... Please wait.';
+                        }, 2000);
+                        
+                        // Poll for retrain completion
+                        checkRetrainStatus();
+                    }
+                } else {
+                    status.className = 'drift-status drift-info';
+                    status.textContent = 'Error: ' + (result.error || 'Unknown error');
+                }
+            } catch (error) {
+                status.className = 'drift-status drift-info';
+                status.textContent = 'Error: ' + error.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Simulate Drift';
+            }
+        }
+
+        // Reset drift and performance tracking
+        async function resetDrift() {
+            const btn = document.getElementById('resetBtn');
+            const status = document.getElementById('driftStatus');
+            
+            btn.disabled = true;
+            btn.textContent = 'Resetting...';
+            
+            try {
+                const response = await fetch('/reset-drift', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    status.style.display = 'block';
+                    status.className = 'drift-status drift-info';
+                    status.textContent = 'Drift detection and performance tracking reset successfully.';
+                    document.getElementById('autoRetrainAlert').style.display = 'none';
+                    
+                    // Reload model info to reflect reset
+                    loadModelInfo();
+                    
+                    // Hide status after 3 seconds
+                    setTimeout(() => {
+                        status.style.display = 'none';
+                    }, 3000);
+                } else {
+                    status.className = 'drift-status drift-alert';
+                    status.textContent = 'Reset failed: ' + (result.error || 'Unknown error');
+                }
+            } catch (error) {
+                status.style.display = 'block';
+                status.className = 'drift-status drift-alert';
+                status.textContent = 'Error: ' + error.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Reset';
+            }
+        }
+
+        // Check retrain status periodically
+        async function checkRetrainStatus() {
+            const status = document.getElementById('driftStatus');
+            let attempts = 0;
+            const maxAttempts = 30;  // 30 * 2s = 60s max wait
+            
+            const interval = setInterval(async () => {
+                attempts++;
+                try {
+                    const response = await fetch('/retrain-status');
+                    const result = await response.json();
+                    
+                    if (!result.is_retraining) {
+                        clearInterval(interval);
+                        status.className = 'drift-status drift-info';
+                        status.innerHTML = '<strong>Auto-retrain complete!</strong> Model reloaded.';
+                        document.getElementById('autoRetrainAlert').style.display = 'none';
+                        loadModelInfo();
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        status.textContent = 'Retrain taking longer than expected...';
+                    }
+                } catch (e) {
+                    // Ignore errors, keep polling
+                }
+            }, 2000);
         }
 
         // Retrain model

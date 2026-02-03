@@ -108,6 +108,16 @@ is_retraining = False  # Lock to prevent concurrent retraining
 prediction_errors = []
 MAX_ERROR_HISTORY = 100
 
+# Real-time performance tracking
+current_performance = {
+    'r2': None,  # Real-time R2 (None means use model's training R2)
+    'mse': None,
+    'sample_count': 0,
+    'predictions': [],
+    'actuals': []
+}
+PERFORMANCE_SAMPLE_SIZE = 50  # Number of samples to keep for performance calculation
+
 # Data drift tracking - baseline statistics (will be set on first predictions)
 baseline_stats = {
     'eta': {'mean': None, 'std': None, 'count': 0},
@@ -411,16 +421,33 @@ def get_model_info():
     
     # Add performance status
     info = model_info.copy()
-    r2 = float(info.get('r2', 0))
     
-    if r2 >= PERFORMANCE_THRESHOLD:
+    # Use real-time R2 if available, otherwise use training R2
+    training_r2 = float(info.get('r2', 0))
+    realtime_r2 = current_performance['r2']
+    
+    # Display real-time R2 if we have enough samples
+    if realtime_r2 is not None and current_performance['sample_count'] >= 10:
+        display_r2 = realtime_r2
+        info['r2_source'] = 'realtime'
+    else:
+        display_r2 = training_r2
+        info['r2_source'] = 'training'
+    
+    info['training_r2'] = training_r2
+    info['realtime_r2'] = realtime_r2
+    info['realtime_sample_count'] = current_performance['sample_count']
+    
+    # Use display_r2 for status calculation
+    if display_r2 >= PERFORMANCE_THRESHOLD:
         info['status'] = 'good'
-    elif r2 >= AUTO_RETRAIN_THRESHOLD:
+    elif display_r2 >= AUTO_RETRAIN_THRESHOLD:
         info['status'] = 'warning'
     else:
         info['status'] = 'poor'
     
-    info['needs_retrain'] = r2 < PERFORMANCE_THRESHOLD
+    info['needs_retrain'] = display_r2 < PERFORMANCE_THRESHOLD
+    info['display_r2'] = display_r2
     
     return jsonify(info)
 
@@ -431,7 +458,7 @@ def retrain():
     Trigger model retraining.
     This will train all models and promote the best one to Staging.
     """
-    global is_retraining
+    global is_retraining, current_performance, drift_detected
     
     if is_retraining:
         return jsonify({'error': 'Retraining already in progress'}), 409
@@ -488,6 +515,17 @@ def retrain():
         # Reload the model
         load_model()
         
+        # Reset real-time performance tracking after retrain
+        current_performance = {
+            'r2': None,
+            'mse': None,
+            'sample_count': 0,
+            'predictions': [],
+            'actuals': []
+        }
+        drift_detected = False
+        DATA_DRIFT_ALERT.set(0)
+        
         print("✅ Retraining complete, model reloaded!")
         
         return jsonify({
@@ -516,6 +554,155 @@ def retrain_status():
     return jsonify({
         'is_retraining': is_retraining
     })
+
+
+@app.route('/simulate-drift', methods=['POST'])
+def simulate_drift():
+    """
+    Simulate data drift by sending abnormal data.
+    This will trigger drift detection, measure real-time performance degradation,
+    and optionally auto-retrain.
+    """
+    global drift_detected, baseline_stats, recent_data, current_performance
+    
+    try:
+        print("\n" + "="*50)
+        print("SIMULATING DATA DRIFT")
+        print("="*50)
+        
+        # Generate abnormal data (very different from normal range)
+        # Normal data: eta ~0-5, f ~0-1, f_prime ~0-2
+        # Abnormal data: values 10x higher
+        abnormal_data = []
+        for _ in range(50):  # Send 50 abnormal samples
+            abnormal_data.append({
+                'eta': np.random.uniform(50, 100),      # Normal: 0-5
+                'f': np.random.uniform(10, 20),         # Normal: 0-1
+                'f_prime': np.random.uniform(20, 50)    # Normal: 0-2
+            })
+        
+        # Process abnormal data through prediction (this updates drift detection)
+        df = pd.DataFrame(abnormal_data)
+        
+        # Update feature statistics with abnormal data
+        for col in ['eta', 'f', 'f_prime']:
+            for val in df[col].values:
+                recent_data[col].append(float(val))
+        
+        update_feature_statistics(df)
+        
+        # Force drift detection
+        drift_scores = check_data_drift()
+        
+        print(f"Drift Scores: {drift_scores}")
+        print(f"Drift Detected: {drift_detected}")
+        
+        # ========================================
+        # REAL-TIME PERFORMANCE MEASUREMENT
+        # ========================================
+        # Make predictions with the abnormal data
+        predictions = model.predict(df[['eta', 'f', 'f_prime']])
+        
+        # Simulate "actual" values - in real scenario, these would come from actual measurements
+        # For drift simulation, we generate actuals that the model SHOULD have predicted
+        # but with added noise to simulate concept drift (model's predictions become less accurate)
+        # 
+        # The idea: when data drifts, the relationship between features and target changes,
+        # so the model's predictions become inaccurate compared to true values
+        simulated_actuals = predictions * np.random.uniform(0.3, 0.7, size=len(predictions)) + \
+                          np.random.normal(0, abs(predictions.mean()) * 0.5, size=len(predictions))
+        
+        # Update real-time performance tracking
+        for pred, actual in zip(predictions, simulated_actuals):
+            current_performance['predictions'].append(float(pred))
+            current_performance['actuals'].append(float(actual))
+            current_performance['sample_count'] += 1
+        
+        # Keep only recent samples
+        if len(current_performance['predictions']) > PERFORMANCE_SAMPLE_SIZE:
+            current_performance['predictions'] = current_performance['predictions'][-PERFORMANCE_SAMPLE_SIZE:]
+            current_performance['actuals'] = current_performance['actuals'][-PERFORMANCE_SAMPLE_SIZE:]
+        
+        # Calculate real-time R2 and MSE
+        if len(current_performance['predictions']) >= 10:
+            preds = np.array(current_performance['predictions'])
+            acts = np.array(current_performance['actuals'])
+            
+            ss_res = np.sum((acts - preds) ** 2)
+            ss_tot = np.sum((acts - np.mean(acts)) ** 2)
+            
+            current_performance['r2'] = float(1 - (ss_res / ss_tot)) if ss_tot > 0 else 0.0
+            current_performance['mse'] = float(np.mean((preds - acts) ** 2))
+            
+            # Clamp R2 to valid range (can go negative with bad predictions)
+            current_performance['r2'] = max(-1.0, min(1.0, current_performance['r2']))
+            
+            print(f"Real-time Performance: R2={current_performance['r2']:.4f}, MSE={current_performance['mse']:.4f}")
+        
+        # Check if auto-retrain should be triggered based on real-time performance
+        auto_retrain_triggered = False
+        realtime_r2 = current_performance['r2']
+        
+        if realtime_r2 is not None and realtime_r2 < AUTO_RETRAIN_THRESHOLD and not is_retraining:
+            print(f"Triggering auto-retrain due to performance drop (R2: {realtime_r2:.4f})...")
+            thread = threading.Thread(target=trigger_background_retrain)
+            thread.start()
+            auto_retrain_triggered = True
+        elif drift_detected and not is_retraining:
+            print("Triggering auto-retrain due to drift...")
+            thread = threading.Thread(target=trigger_background_retrain)
+            thread.start()
+            auto_retrain_triggered = True
+        
+        return jsonify({
+            'success': True,
+            'drift_detected': drift_detected,
+            'drift_scores': drift_scores,
+            'realtime_r2': current_performance['r2'],
+            'realtime_mse': current_performance['mse'],
+            'sample_count': current_performance['sample_count'],
+            'auto_retrain_triggered': auto_retrain_triggered,
+            'message': 'Drift simulation complete'
+        })
+        
+    except Exception as e:
+        print(f"Error simulating drift: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/reset-drift', methods=['POST'])
+def reset_drift():
+    """Reset drift detection baseline and real-time performance tracking."""
+    global drift_detected, baseline_stats, recent_data, current_performance
+    
+    drift_detected = False
+    baseline_stats = {
+        'eta': {'mean': None, 'std': None, 'count': 0},
+        'f': {'mean': None, 'std': None, 'count': 0},
+        'f_prime': {'mean': None, 'std': None, 'count': 0}
+    }
+    recent_data = {
+        'eta': deque(maxlen=DRIFT_WINDOW_SIZE),
+        'f': deque(maxlen=DRIFT_WINDOW_SIZE),
+        'f_prime': deque(maxlen=DRIFT_WINDOW_SIZE)
+    }
+    
+    # Reset real-time performance tracking
+    current_performance = {
+        'r2': None,
+        'mse': None,
+        'sample_count': 0,
+        'predictions': [],
+        'actuals': []
+    }
+    
+    DATA_DRIFT_ALERT.set(0)
+    for col in ['eta', 'f', 'f_prime']:
+        DATA_DRIFT_SCORE.labels(feature=col).set(0)
+    
+    return jsonify({'success': True, 'message': 'Drift detection and performance tracking reset'})
 
 
 @app.route('/performance-check', methods=['POST'])
@@ -598,7 +785,7 @@ def performance_check():
 
 def trigger_background_retrain():
     """Trigger retraining in background."""
-    global is_retraining
+    global is_retraining, current_performance, drift_detected
     
     if is_retraining:
         return
@@ -621,6 +808,18 @@ def trigger_background_retrain():
         
         # Reload model
         load_model()
+        
+        # Reset real-time performance tracking after retrain
+        current_performance = {
+            'r2': None,
+            'mse': None,
+            'sample_count': 0,
+            'predictions': [],
+            'actuals': []
+        }
+        drift_detected = False
+        DATA_DRIFT_ALERT.set(0)
+        
         print("✅ Auto-retrain complete!")
         
     except Exception as e:
