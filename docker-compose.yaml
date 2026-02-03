@@ -7,17 +7,30 @@ services:
       - "5000:5000"
     volumes:
       - ./mlruns:/app/mlruns
+      - ./data:/app/data
     environment:
       - MLFLOW_TRACKING_URI=file:///app/mlruns
+      - MLRUNS_PATH=/app/mlruns
     networks:
       - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   prometheus:
     image: prom/prometheus:latest
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
     ports:
       - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
     networks:
       - monitoring
 
@@ -25,8 +38,20 @@ services:
     image: grafana/grafana:latest
     ports:
       - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
     networks:
       - monitoring
+    depends_on:
+      - prometheus
 
 networks:
   monitoring:
+
+volumes:
+  prometheus_data:
+  grafana_data:

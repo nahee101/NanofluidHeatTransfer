@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nanofluid Heat Transfer Prediction</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --background-start: #f5f7fa;
+            --background-end: #c3cfe2;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--background-start) 0%, var(--background-end) 100%);
+            color: var(--text-color);
+        }
+
+        .main-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 1200px;
+        }
+
+        .container {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 450px;
+            transition: transform 0.3s ease;
+        }
+
+        .container:hover {
+            transform: translateY(-5px);
+        }
+
+        h1, h2 {
+            text-align: center;
+            color: var(--primary-color);
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            margin-bottom: 1.5rem;
+        }
+
+        h2 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            box-sizing: border-box;
+            transition: border-color 0.3s ease;
+        }
+
+        input[type="number"]:focus {
+            border-color: var(--primary-color);
+            outline: none;
+        }
+
+        button {
+            width: 100%;
+            padding: 0.9rem;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+        }
+
+        button:hover {
+            background-color: #357abd;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-retrain {
+            background-color: var(--warning-color);
+            color: #333;
+            margin-top: 1rem;
+        }
+
+        .btn-retrain:hover {
+            background-color: #e0a800;
+        }
+
+        #result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: #e8f4fd;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: bold;
+            display: none;
+        }
+
+        .result-value {
+            color: var(--primary-color);
+            font-size: 1.2rem;
+        }
+
+        .loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        /* Model Info Box Styles */
+        .model-info-box {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .model-info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .model-info-row:last-child {
+            border-bottom: none;
+        }
+
+        .model-info-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .model-info-value {
+            font-weight: bold;
+            color: var(--text-color);
+        }
+
+        /* Status Badge */
+        .status-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .status-good {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .status-bad {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        /* Performance Bar */
+        .performance-container {
+            margin-top: 1rem;
+        }
+
+        .performance-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.3rem;
+        }
+
+        .performance-bar {
+            height: 10px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .performance-fill {
+            height: 100%;
+            border-radius: 5px;
+            transition: width 0.5s ease;
+        }
+
+        /* Retrain Status */
+        #retrainStatus {
+            margin-top: 1rem;
+            padding: 0.8rem;
+            border-radius: 6px;
+            text-align: center;
+            display: none;
+        }
+
+        .retrain-progress {
+            background-color: #cce5ff;
+            color: #004085;
+        }
+
+        .retrain-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .retrain-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        /* Auto Retrain Alert */
+        .auto-retrain-alert {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 0.8rem;
+            margin-bottom: 1rem;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Model Info Panel -->
+        <div class="container">
+            <h2>Current Model Info</h2>
+            
+            <div class="auto-retrain-alert" id="autoRetrainAlert">
+                Performance dropped! Auto-retraining recommended.
+            </div>
+            
+            <div class="model-info-box" id="modelInfoBox">
+                <div class="model-info-row">
+                    <span class="model-info-label">Model Name</span>
+                    <span class="model-info-value" id="modelName">Loading...</span>
+                </div>
+                <div class="model-info-row">
+                    <span class="model-info-label">Run ID</span>
+                    <span class="model-info-value" id="modelRunId" style="font-size: 0.85rem;">-</span>
+                </div>
+                <div class="model-info-row">
+                    <span class="model-info-label">Algorithm</span>
+                    <span class="model-info-value" id="modelType">-</span>
+                </div>
+                <div class="model-info-row">
+                    <span class="model-info-label">R2 Score</span>
+                    <span class="model-info-value" id="modelR2">-</span>
+                </div>
+                <div class="model-info-row">
+                    <span class="model-info-label">MSE</span>
+                    <span class="model-info-value" id="modelMSE">-</span>
+                </div>
+                <div class="model-info-row">
+                    <span class="model-info-label">Status</span>
+                    <span class="model-info-value">
+                        <span class="status-badge" id="modelStatus">-</span>
+                    </span>
+                </div>
+            </div>
+            
+            <!-- Performance Bar -->
+            <div class="performance-container">
+                <div class="performance-label">
+                    <span>Performance (R2)</span>
+                    <span id="performancePercent">-</span>
+                </div>
+                <div class="performance-bar">
+                    <div class="performance-fill" id="performanceFill" style="width: 0%; background-color: #28a745;"></div>
+                </div>
+            </div>
+            
+            <!-- Retrain Button -->
+            <button class="btn-retrain" id="retrainBtn" onclick="retrainModel()">
+                Retrain Model
+            </button>
+            
+            <div id="retrainStatus"></div>
+        </div>
+
+        <!-- Prediction Panel -->
+        <div class="container">
+            <h1>Nanofluid Heat Transfer Predictor</h1>
+            <form id="predictionForm">
+                <div class="form-group">
+                    <label for="eta">Eta (n)</label>
+                    <input type="number" id="eta" name="eta" step="any" placeholder="e.g., 0.1" required>
+                </div>
+                <div class="form-group">
+                    <label for="f">f</label>
+                    <input type="number" id="f" name="f" step="any" placeholder="e.g., 0.5" required>
+                </div>
+                <div class="form-group">
+                    <label for="f_prime">f_prime (f')</label>
+                    <input type="number" id="f_prime" name="f_prime" step="any" placeholder="e.g., 1.0" required>
+                </div>
+                <button type="submit">Predict</button>
+            </form>
+            <div id="result">
+                Prediction: <span class="result-value" id="predictionValue"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Performance threshold for auto-retrain alert
+        const PERFORMANCE_THRESHOLD = 0.95;  // R2 below this triggers warning
+
+        // Load model info on page load
+        async function loadModelInfo() {
+            try {
+                const response = await fetch('/model-info');
+                if (!response.ok) {
+                    document.getElementById('modelName').textContent = 'Not loaded';
+                    document.getElementById('modelStatus').textContent = 'Error';
+                    document.getElementById('modelStatus').className = 'status-badge status-bad';
+                    return;
+                }
+
+                const info = await response.json();
+                
+                document.getElementById('modelName').textContent = info.name || 'Unknown';
+                // Show run_id (truncated for display)
+                const runId = info.run_id || '-';
+                document.getElementById('modelRunId').textContent = runId.length > 12 ? runId.substring(0, 12) + '...' : runId;
+                document.getElementById('modelRunId').title = runId;  // Full ID on hover
+                document.getElementById('modelType').textContent = info.model_type || 'Unknown';
+                
+                const r2 = parseFloat(info.r2);
+                const mse = parseFloat(info.mse);
+                
+                document.getElementById('modelR2').textContent = isNaN(r2) ? '-' : r2.toFixed(6);
+                document.getElementById('modelMSE').textContent = isNaN(mse) ? '-' : mse.toFixed(6);
+                
+                // Update performance bar
+                if (!isNaN(r2)) {
+                    const percent = Math.max(0, Math.min(100, r2 * 100));
+                    document.getElementById('performancePercent').textContent = percent.toFixed(1) + '%';
+                    document.getElementById('performanceFill').style.width = percent + '%';
+                    
+                    // Color based on performance
+                    let color = '#28a745';  // green
+                    if (r2 < 0.9) color = '#dc3545';  // red
+                    else if (r2 < PERFORMANCE_THRESHOLD) color = '#ffc107';  // yellow
+                    document.getElementById('performanceFill').style.backgroundColor = color;
+                    
+                    // Update status badge
+                    if (r2 >= PERFORMANCE_THRESHOLD) {
+                        document.getElementById('modelStatus').textContent = 'Good';
+                        document.getElementById('modelStatus').className = 'status-badge status-good';
+                    } else if (r2 >= 0.9) {
+                        document.getElementById('modelStatus').textContent = 'Warning';
+                        document.getElementById('modelStatus').className = 'status-badge status-warning';
+                        document.getElementById('autoRetrainAlert').style.display = 'block';
+                    } else {
+                        document.getElementById('modelStatus').textContent = 'Poor';
+                        document.getElementById('modelStatus').className = 'status-badge status-bad';
+                        document.getElementById('autoRetrainAlert').style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading model info:', error);
+                document.getElementById('modelName').textContent = 'Error loading';
+            }
+        }
+
+        // Retrain model
+        async function retrainModel() {
+            const btn = document.getElementById('retrainBtn');
+            const status = document.getElementById('retrainStatus');
+            
+            btn.disabled = true;
+            btn.textContent = 'Retraining...';
+            status.style.display = 'block';
+            status.className = 'retrain-progress';
+            status.textContent = 'Training in progress... This may take a minute.';
+            
+            try {
+                const response = await fetch('/retrain', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    status.className = 'retrain-success';
+                    status.innerHTML = `
+                        Retraining complete!<br>
+                        Best model: ${result.best_model}<br>
+                        R2: ${result.r2.toFixed(6)}
+                    `;
+                    // Reload model info after retrain
+                    setTimeout(() => {
+                        loadModelInfo();
+                        document.getElementById('autoRetrainAlert').style.display = 'none';
+                    }, 1000);
+                } else {
+                    status.className = 'retrain-error';
+                    status.textContent = 'Retrain failed: ' + (result.error || 'Unknown error');
+                }
+            } catch (error) {
+                status.className = 'retrain-error';
+                status.textContent = 'Error: ' + error.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Retrain Model';
+            }
+        }
+
+        // Prediction form handler
+        document.getElementById('predictionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const button = this.querySelector('button');
+            const resultDiv = document.getElementById('result');
+            const predictionValueSpan = document.getElementById('predictionValue');
+            
+            button.classList.add('loading');
+            button.textContent = 'Predicting...';
+            resultDiv.style.display = 'none';
+
+            const data = {
+                eta: parseFloat(document.getElementById('eta').value),
+                f: parseFloat(document.getElementById('f').value),
+                f_prime: parseFloat(document.getElementById('f_prime').value)
+            };
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify([data])
+                });
+
+                if (!response.ok) {
+                    throw new Error('Prediction failed');
+                }
+
+                const result = await response.json();
+                predictionValueSpan.textContent = result.predictions[0].toFixed(5);
+                resultDiv.style.display = 'block';
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred during prediction. Please try again.');
+            } finally {
+                button.classList.remove('loading');
+                button.textContent = 'Predict';
+            }
+        });
+
+        // Load model info on page load
+        loadModelInfo();
+        
+        // Refresh model info every 30 seconds
+        setInterval(loadModelInfo, 30000);
+    </script>
+</body>
+</html>
